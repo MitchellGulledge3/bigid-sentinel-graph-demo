@@ -1,0 +1,48 @@
+// Orphan Cluster Detection
+// Question: Find clusters of orphaned (no owner) sensitive assets that share
+// BOTH a common DataSource AND a common LastAccessedBy. These are the silent
+// risk piles — usually a former employee + an unmaintained share.
+//
+// Output: cluster_key (data_source + last_accessor), asset_count,
+// classifications, sample_assets, oldest_last_access.
+
+let src = BigIDDSPMAssetStoreDemo_CL
+| where isempty(Owner) or Owner == "" or Owner == "orphan" or isnull(Owner)
+| where Sensitivity in ("High","Critical","Restricted") or Classification in ("PII","PHI","PCI","Financial","Confidential")
+| project AssetId, AssetName, Classification, Sensitivity, DataSource,
+          LastAccessedBy, LastAccessDateTime;
+let assetNodes = src
+| project nodeId = tostring(AssetId), nodeType = "Asset",
+          label = AssetName, classification = tostring(Classification);
+let dsNodes = src | distinct DataSource
+| project nodeId = strcat("ds::", DataSource), nodeType = "DataSource",
+          label = tostring(DataSource), classification = "";
+let userNodes = src | where isnotempty(LastAccessedBy) | distinct LastAccessedBy
+| project nodeId = tostring(LastAccessedBy), nodeType = "User",
+          label = tostring(LastAccessedBy), classification = "";
+let nodes = union assetNodes, dsNodes, userNodes | distinct nodeId, nodeType, label, classification;
+let edges = union
+    (src | project source = tostring(AssetId), target = strcat("ds::", DataSource), edge = "STORED_IN"),
+    (src | where isnotempty(LastAccessedBy)
+         | project source = tostring(AssetId), target = tostring(LastAccessedBy), edge = "LAST_ACCESSED_BY");
+edges
+| make-graph source --> target with nodes on nodeId
+| graph-match (asset)-[e1]->(ds)-[e2]-(asset2)-[e3]->(user)
+    where asset.nodeType == "Asset"
+      and ds.nodeType == "DataSource"
+      and asset2.nodeType == "Asset"
+      and user.nodeType == "User"
+      and asset.label != asset2.label
+    project asset_id = asset.label,
+            partner_asset = asset2.label,
+            data_source = ds.label,
+            last_accessor = user.label,
+            classification = asset.classification
+| extend cluster_key = strcat(data_source, " :: ", last_accessor)
+| summarize asset_count = dcount(asset_id),
+            classifications = make_set(classification, 10),
+            sample_assets = make_set(asset_id, 5)
+        by cluster_key, data_source, last_accessor
+| where asset_count >= 2
+| order by asset_count desc
+| take 25

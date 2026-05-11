@@ -1,0 +1,45 @@
+// Cross-Source Leakage (a.k.a. Data Sprawl)
+// Question: For each owner + classification, how many DISTINCT data sources
+// hold sensitive assets they own? Owners who span 3+ data sources for the
+// same regulated classification are the textbook DLP-failure pattern.
+//
+// Output: owner, classification, distinct_data_sources, asset_count, sources.
+
+let src = BigIDDSPMAssetStoreDemo_CL
+| where isnotempty(Owner)
+| where Classification in ("PII","PHI","PCI","Financial","Confidential")
+| project AssetId, AssetName, Classification, DataSource, Owner;
+let assetNodes = src
+| project nodeId = tostring(AssetId), nodeType = "Asset",
+          label = AssetName, classification = tostring(Classification),
+          dataSource = tostring(DataSource);
+let dsNodes = src | distinct DataSource
+| project nodeId = strcat("ds::", DataSource), nodeType = "DataSource",
+          label = tostring(DataSource), classification = "", dataSource = tostring(DataSource);
+let ownerNodes = src | distinct Owner
+| project nodeId = tostring(Owner), nodeType = "User",
+          label = tostring(Owner), classification = "", dataSource = "";
+let nodes = union assetNodes, dsNodes, ownerNodes
+| distinct nodeId, nodeType, label, classification, dataSource;
+let edges = union
+    (src | project source = tostring(Owner), target = tostring(AssetId), edge = "OWNS"),
+    (src | project source = tostring(AssetId), target = strcat("ds::", DataSource), edge = "STORED_IN");
+edges
+| make-graph source --> target with nodes on nodeId
+| graph-match (owner)-[e1]->(asset)-[e2]->(ds)
+    where owner.nodeType == "User"
+      and asset.nodeType == "Asset"
+      and ds.nodeType == "DataSource"
+      and asset.classification in ("PII","PHI","PCI","Financial","Confidential")
+    project owner_id = owner.label,
+            classification = asset.classification,
+            data_source = ds.label,
+            asset_label = asset.label
+| summarize distinct_data_sources = dcount(data_source),
+            asset_count = dcount(asset_label),
+            sources = make_set(data_source, 10),
+            sample_assets = make_set(asset_label, 5)
+        by owner_id, classification
+| where distinct_data_sources >= 3
+| order by distinct_data_sources desc, asset_count desc
+| take 25

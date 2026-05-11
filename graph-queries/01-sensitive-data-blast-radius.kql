@@ -1,0 +1,75 @@
+// Sensitive Data Blast Radius
+// Question: For each identity (User/ExternalParty), how many sensitive assets are
+// reachable in <= 2 hops via OWNED_BY / SHARED_WITH / LAST_ACCESSED_BY edges,
+// and what is the worst-case classification along the path?
+//
+// Output: identity, blast_score (weighted by classification), reachable_asset_count,
+// worst_classification, sample_assets.
+//
+// Expected runtime on 500 demo rows: < 5s.
+
+let src = BigIDDSPMAssetStoreDemo_CL
+| project AssetId, AssetName, Sensitivity, Classification, DataSource,
+          Owner, LastAccessedBy, ExposedToUsers;
+//
+// Nodes: every asset + every distinct identity we can find on the row
+//
+let assetNodes = src
+| project nodeId = tostring(AssetId), nodeType = "Asset",
+          label = AssetName, classification = tostring(Classification),
+          sensitivity = tostring(Sensitivity), dataSource = tostring(DataSource);
+let identityNodes = src
+| mv-expand exposed = ExposedToUsers to typeof(string)
+| extend identities = pack_array(tostring(Owner), tostring(LastAccessedBy), exposed)
+| mv-expand id = identities to typeof(string)
+| where isnotempty(id)
+| extend isExternal = id !contains "@contoso.com" and (id contains "@" or id contains "anonymous" or id contains "link" or id contains "ext-")
+| project nodeId = id, nodeType = iff(isExternal, "ExternalParty", "User"),
+          label = id, classification = "", sensitivity = "", dataSource = ""
+| distinct nodeId, nodeType, label, classification, sensitivity, dataSource;
+let nodes = union assetNodes, identityNodes | distinct nodeId, nodeType, label, classification, sensitivity, dataSource;
+//
+// Edges: OWNED_BY / SHARED_WITH / LAST_ACCESSED_BY
+//
+let ownedBy = src | where isnotempty(Owner)
+| project source = tostring(AssetId), target = tostring(Owner), edge = "OWNED_BY";
+let sharedWith = src
+| mv-expand exposed = ExposedToUsers to typeof(string)
+| where isnotempty(exposed)
+| project source = tostring(AssetId), target = exposed, edge = "SHARED_WITH";
+let lastAccess = src | where isnotempty(LastAccessedBy)
+| project source = tostring(AssetId), target = tostring(LastAccessedBy), edge = "LAST_ACCESSED_BY";
+let edges = union ownedBy, sharedWith, lastAccess;
+//
+// Build the graph and walk 1-2 hops out from every identity
+//
+edges
+| make-graph source --> target with nodes on nodeId
+| graph-match (identity)-[e1]->(asset1)-[e2*0..1]->(asset2)
+    where (identity.nodeType == "User" or identity.nodeType == "ExternalParty")
+      and (asset1.nodeType == "Asset")
+      and (asset2.nodeType == "Asset")
+      and (asset2.classification in ("PII","PHI","PCI","Financial","Confidential"))
+    project identity_id = identity.label,
+            identity_type = identity.nodeType,
+            reachable_asset = asset2.label,
+            classification = asset2.classification,
+            sensitivity = asset2.sensitivity,
+            data_source = asset2.dataSource
+| summarize reachable_asset_count = dcount(reachable_asset),
+            worst_classification = arg_max(iff(classification == "PCI", 4,
+                                          iff(classification == "PHI", 3,
+                                          iff(classification == "PII", 2,
+                                          iff(classification == "Financial", 1, 0)))), classification),
+            sample_assets = make_set(reachable_asset, 5),
+            data_sources = make_set(data_source, 5)
+        by identity_id, identity_type
+| extend blast_score = reachable_asset_count * case(worst_classification == "PCI", 4,
+                                                  worst_classification == "PHI", 3,
+                                                  worst_classification == "PII", 2,
+                                                  worst_classification == "Financial", 1,
+                                                  1)
+| project identity_id, identity_type, blast_score, reachable_asset_count,
+          worst_classification, data_sources, sample_assets
+| order by blast_score desc
+| take 25
