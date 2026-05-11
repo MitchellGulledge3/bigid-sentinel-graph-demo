@@ -22,9 +22,9 @@ Same BigID data. New shape. New questions. Same `BigIDDSPMAssetStoreDemo_CL` tab
 
 ---
 
-## Demo in VS Code (90 seconds)
+## Demo in VS Code (90 seconds, with rendered graphs)
 
-This is the fastest way to show it live in front of someone — pure VS Code, two panes, no browser flipping.
+This is the fastest way to show it live in front of someone — pure VS Code, two panes, real graph visualizations, no browser flipping.
 
 ### One-time setup
 
@@ -35,37 +35,47 @@ code .
 az login   # use a user that has Log Analytics Reader on the workspace
 ```
 
-### Demo layout in VS Code
+When VS Code opens the folder it will prompt you to install the **recommended extension** ([`bierner.markdown-mermaid`](https://marketplace.visualstudio.com/items?itemName=bierner.markdown-mermaid)). Click **Install**. That extension is what makes Markdown preview render Mermaid graphs natively.
 
-1. **Left pane:** Open `README.md` and press `⇧⌘V` (Mac) / `Ctrl+Shift+V` (Win/Linux) for the rendered Markdown preview. The Mermaid diagrams render natively.
-2. **Right pane:** Split editor → open the integrated terminal (`` ⌃` ``).
-3. Optional: open a `.kql` file from `graph-queries/` in a third tab so the audience can see the actual query.
-
-### Run the queries
+### Run a query — get a rendered graph
 
 ```bash
-# Interactive menu — pick 1-5 or "all"
-python3 demo.py
-
-# One-shot
-python3 demo.py 1        # Sensitive Data Blast Radius
-python3 demo.py 2        # External Exposure Paths
-python3 demo.py 3        # Orphan Cluster Detection
-python3 demo.py 4        # Threat Lateral Movement
-python3 demo.py 5        # Cross-Source Leakage
-python3 demo.py all      # Run them all in sequence
+python3 demo.py 1     # or 2, 3, 4, 5, or "all"
 ```
 
-`demo.py` shells out to `az monitor log-analytics query` — zero Python deps, zero auth dance, just uses your `az login`.
+Each run does two things:
 
-### Suggested 90-second talk track
+1. Prints the top rows in the terminal.
+2. Writes a Markdown file with a **Mermaid graph + result table** to `output/<n>-<slug>.md`.
 
-1. "Same BigID data the other repo used — but now we project it as a graph." → show `docs/graph-model.md`
-2. `python3 demo.py 1` — point at `blast_score` column, name top identity → "compromise this user, here's the exposure"
-3. `python3 demo.py 2` — point at `auditor@external-firm.com` row → "external party, one hop, PHI/HIPAA"
-4. `python3 demo.py 4` — point at `185.220.101.45` (Tor exit node) → "active threat already touching trade secrets"
-5. Pop the README preview pane → show the Mermaid result diagrams → "every result you just saw also renders as a graph picture"
-6. Close: "all 5 are also one `Save as tool` away from being agent-callable" → drop `bigid-sentinel-mcp-demo-ui` link
+To see the graph: open the file VS Code points you to, then press **`⇧⌘V` (Mac) / `Ctrl+Shift+V` (Win/Linux)** for the rendered Markdown preview. You'll see the actual nodes and edges — IPs in red, threats in purple, regulated assets in amber, external parties in blue.
+
+### Suggested 2-pane layout for the call
+
+```
+┌────────────────────────────┬────────────────────────────┐
+│  Terminal                  │  output/01-…md  (preview)  │
+│                            │                            │
+│  $ python3 demo.py 1       │   [rendered graph here]    │
+│  $ python3 demo.py 4       │                            │
+└────────────────────────────┴────────────────────────────┘
+```
+
+Workflow:
+
+1. In the left pane, run `python3 demo.py 1`.
+2. Open `output/01-sensitive-data-blast-radius.md` in the right pane → `⇧⌘V`.
+3. Repeat for 2, 3, 4, 5 — the same preview pane updates each time.
+
+### Talk track (90 seconds)
+
+| Step | Say | Show |
+| :-: | --- | --- |
+| 1 | "Same BigID data — projected as a graph." | `docs/graph-model.md` preview |
+| 2 | "Compromise this user → here's the blast radius." | `python3 demo.py 1` → `output/01-…md` preview |
+| 3 | "External auditor — one hop from PHI/HIPAA." | `python3 demo.py 2` → `output/02-…md` preview |
+| 4 | "Tor exit IP `185.220.101.45` already touching trade secrets." | `python3 demo.py 4` → `output/04-…md` preview |
+| 5 | "Each of these is one `Save as tool` away from being agent-callable." | drop link to [`bigid-sentinel-mcp-demo-ui`](https://github.com/MitchellGulledge3/bigid-sentinel-mcp-demo-ui) |
 
 ### If you want a different workspace
 
