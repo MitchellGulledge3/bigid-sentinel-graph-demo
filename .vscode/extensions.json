@@ -1,6 +1,8 @@
 {
   "recommendations": [
     "bierner.markdown-mermaid",
-    "bpruitt-goddard.mermaid-markdown-syntax-highlighting"
+    "bpruitt-goddard.mermaid-markdown-syntax-highlighting",
+    "ms-toolsai.jupyter",
+    "ms-python.python"
   ]
 }

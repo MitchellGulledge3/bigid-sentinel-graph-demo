@@ -24,7 +24,7 @@ Same BigID data. New shape. New questions. Same `BigIDDSPMAssetStoreDemo_CL` tab
 
 ## Demo in VS Code (90 seconds, with rendered graphs)
 
-This is the fastest way to show it live in front of someone — pure VS Code, two panes, real graph visualizations, no browser flipping.
+This is the fastest way to show it live in front of someone — pure VS Code, rendered graph visualizations, no browser flipping.
 
 ### One-time setup
 
@@ -35,47 +35,49 @@ code .
 az login   # use a user that has Log Analytics Reader on the workspace
 ```
 
-When VS Code opens the folder it will prompt you to install the **recommended extension** ([`bierner.markdown-mermaid`](https://marketplace.visualstudio.com/items?itemName=bierner.markdown-mermaid)). Click **Install**. That extension is what makes Markdown preview render Mermaid graphs natively.
+When VS Code opens the folder, install the **recommended extensions** when prompted:
+- [`bierner.markdown-mermaid`](https://marketplace.visualstudio.com/items?itemName=bierner.markdown-mermaid) — renders Mermaid in Markdown preview
+- [`ms-toolsai.jupyter`](https://marketplace.visualstudio.com/items?itemName=ms-toolsai.jupyter) — opens & runs the `.ipynb` notebooks
 
-### Run a query — get a rendered graph
+### Option A — Jupyter notebooks (recommended for the call) 📓
+
+The `notebooks/` folder contains 5 pre-executed Jupyter notebooks. **They already have rendered graph images baked in.** Just open one — you'll see the visualization instantly without running anything.
+
+| Notebook | Renders |
+| --- | --- |
+| [`notebooks/01-blast-radius.ipynb`](notebooks/01-blast-radius.ipynb) | Identity → reachable sensitive assets |
+| [`notebooks/02-external-exposure.ipynb`](notebooks/02-external-exposure.ipynb) | External party → PII/PHI/PCI assets |
+| [`notebooks/03-orphan-clusters.ipynb`](notebooks/03-orphan-clusters.ipynb) | Data source ← orphaned sensitive assets |
+| [`notebooks/04-threat-movement.ipynb`](notebooks/04-threat-movement.ipynb) | Malicious IP → threat → regulated assets |
+| [`notebooks/05-cross-source-leakage.ipynb`](notebooks/05-cross-source-leakage.ipynb) | Owner → classification → 10 data sources |
+
+To re-run live in the call:
+```bash
+python3 -m venv .venv && source .venv/bin/activate
+pip install jupyter ipykernel matplotlib networkx pandas
+```
+Then in VS Code, open a notebook → click **Run All**. Each notebook re-runs the live KQL against your workspace and re-renders the NetworkX graph.
+
+### Option B — Mermaid via `demo.py` ⚡
+
+Faster cycle, no Jupyter needed:
 
 ```bash
-python3 demo.py 1     # or 2, 3, 4, 5, or "all"
+python3 demo.py 1     # writes output/01-…md with a Mermaid graph
+python3 demo.py all   # all five
 ```
 
-Each run does two things:
-
-1. Prints the top rows in the terminal.
-2. Writes a Markdown file with a **Mermaid graph + result table** to `output/<n>-<slug>.md`.
-
-To see the graph: open the file VS Code points you to, then press **`⇧⌘V` (Mac) / `Ctrl+Shift+V` (Win/Linux)** for the rendered Markdown preview. You'll see the actual nodes and edges — IPs in red, threats in purple, regulated assets in amber, external parties in blue.
-
-### Suggested 2-pane layout for the call
-
-```
-┌────────────────────────────┬────────────────────────────┐
-│  Terminal                  │  output/01-…md  (preview)  │
-│                            │                            │
-│  $ python3 demo.py 1       │   [rendered graph here]    │
-│  $ python3 demo.py 4       │                            │
-└────────────────────────────┴────────────────────────────┘
-```
-
-Workflow:
-
-1. In the left pane, run `python3 demo.py 1`.
-2. Open `output/01-sensitive-data-blast-radius.md` in the right pane → `⇧⌘V`.
-3. Repeat for 2, 3, 4, 5 — the same preview pane updates each time.
+Open the file in `output/` and press **`⇧⌘V`** (Mac) / **`Ctrl+Shift+V`** (Win/Linux) — the Mermaid diagram renders in VS Code's preview pane.
 
 ### Talk track (90 seconds)
 
 | Step | Say | Show |
 | :-: | --- | --- |
 | 1 | "Same BigID data — projected as a graph." | `docs/graph-model.md` preview |
-| 2 | "Compromise this user → here's the blast radius." | `python3 demo.py 1` → `output/01-…md` preview |
-| 3 | "External auditor — one hop from PHI/HIPAA." | `python3 demo.py 2` → `output/02-…md` preview |
-| 4 | "Tor exit IP `185.220.101.45` already touching trade secrets." | `python3 demo.py 4` → `output/04-…md` preview |
-| 5 | "Each of these is one `Save as tool` away from being agent-callable." | drop link to [`bigid-sentinel-mcp-demo-ui`](https://github.com/MitchellGulledge3/bigid-sentinel-mcp-demo-ui) |
+| 2 | "Compromise this user → here's the blast radius." | open `notebooks/01-blast-radius.ipynb` |
+| 3 | "External auditor — one hop from PHI/HIPAA." | open `notebooks/02-external-exposure.ipynb` |
+| 4 | "Tor exit IP already touching trade secrets." | open `notebooks/04-threat-movement.ipynb` |
+| 5 | "Each of these is one `Save as tool` away from being agent-callable." | link to [`bigid-sentinel-mcp-demo-ui`](https://github.com/MitchellGulledge3/bigid-sentinel-mcp-demo-ui) |
 
 ### If you want a different workspace
 
