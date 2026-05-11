@@ -1,47 +1,52 @@
-// External Exposure Paths
+// 02 — External Exposure Paths
 // Question: Show every path from an ExternalParty to a regulated asset
-// (PII / PHI / PCI / Financial), 1-3 hops, sorted by shortest path first.
-//
-// Output: external_party, path_length, target_asset, classification, path_assets.
-//
-// Use case: privacy / DPO review of "what is the shortest way somebody outside
-// the org can reach our regulated data?"
+// (PII / PHI / PCI / Financial / GDPR / HIPAA), 1-2 hops.
 
 let src = BigIDDSPMAssetStoreDemo_CL
-| project AssetId, AssetName, Classification, DataSource,
-          Owner, LastAccessedBy, ExposedToUsers;
+| extend OwnerUpn = tostring(parse_json(AssetOwner).AccountUpn)
+| extend Perms = parse_json(AssetPermissions)
+| extend AllUsers = array_concat(
+    coalesce(Perms.Read, dynamic([])),
+    coalesce(Perms.Write, dynamic([])),
+    coalesce(Perms.FullControl, dynamic([])))
+| project AssetID, AssetName, AssetSource, Classification, OwnerUpn, UserName, AllUsers;
 let assetNodes = src
-| project nodeId = tostring(AssetId), nodeType = "Asset",
-          label = AssetName, classification = tostring(Classification);
+| project nodeId = tostring(AssetID), nodeType = "Asset",
+          label = AssetName, classification = tostring(Classification),
+          dataSource = tostring(AssetSource);
 let identityNodes = src
-| mv-expand exposed = ExposedToUsers to typeof(string)
-| extend ids = pack_array(tostring(Owner), tostring(LastAccessedBy), exposed)
+| mv-expand u = AllUsers to typeof(string)
+| extend ids = pack_array(OwnerUpn, UserName, u)
 | mv-expand id = ids to typeof(string)
-| where isnotempty(id)
-| extend isExternal = id !contains "@contoso.com" and (id contains "@" or id contains "anonymous" or id contains "link" or id contains "ext-")
+| where isnotempty(id) and id contains "@" and id != "unknown"
+| extend isExternal = id !contains "@contoso.com"
 | project nodeId = id, nodeType = iff(isExternal, "ExternalParty", "User"),
-          label = id, classification = ""
-| distinct nodeId, nodeType, label, classification;
-let nodes = union assetNodes, identityNodes | distinct nodeId, nodeType, label, classification;
+          label = id, classification = "", dataSource = ""
+| distinct nodeId, nodeType, label, classification, dataSource;
+let nodes = union assetNodes, identityNodes
+| distinct nodeId, nodeType, label, classification, dataSource;
 let edges = union
-    (src | mv-expand exposed = ExposedToUsers to typeof(string)
-         | where isnotempty(exposed)
-         | project source = exposed, target = tostring(AssetId), edge = "CAN_REACH"),
-    (src | where isnotempty(Owner)
-         | project source = tostring(Owner), target = tostring(AssetId), edge = "OWNS"),
-    (src | where isnotempty(LastAccessedBy)
-         | project source = tostring(LastAccessedBy), target = tostring(AssetId), edge = "ACCESSES");
+    (src | mv-expand u = AllUsers to typeof(string)
+         | where isnotempty(u) and u contains "@"
+         | project source = tostring(u), target = tostring(AssetID), edge = "CAN_REACH"),
+    (src | where isnotempty(OwnerUpn) and OwnerUpn != "unknown"
+         | project source = OwnerUpn, target = tostring(AssetID), edge = "OWNS"),
+    (src | where isnotempty(UserName) and UserName contains "@"
+         | project source = tostring(UserName), target = tostring(AssetID), edge = "ACCESSES");
 edges
 | make-graph source --> target with nodes on nodeId
-| graph-match (ext)-[e*1..3]->(target)
+| graph-match (ext)-[e]->(target)
     where ext.nodeType == "ExternalParty"
       and target.nodeType == "Asset"
-      and target.classification in ("PII","PHI","PCI","Financial")
+      and target.classification has_any ("PII","PHI","PCI","Financial","GDPR","HIPAA","Trade Secret")
     project external_party = ext.label,
             target_asset = target.label,
             classification = target.classification,
-            path_length = array_length(e),
-            edge_chain = e.edge
-| summarize arg_min(path_length, edge_chain) by external_party, target_asset, classification
-| order by path_length asc, classification asc
-| take 50
+            data_source = target.dataSource,
+            edge_label = e.edge
+| summarize sample_paths = make_set(strcat(external_party, " -[", edge_label, "]-> ", target_asset), 5),
+            assets_count = dcount(target_asset),
+            classifications = make_set(classification, 5)
+        by external_party, classification
+| order by assets_count desc
+| take 25

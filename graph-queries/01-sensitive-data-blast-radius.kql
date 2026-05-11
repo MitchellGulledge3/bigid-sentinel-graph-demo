@@ -1,75 +1,61 @@
-// Sensitive Data Blast Radius
-// Question: For each identity (User/ExternalParty), how many sensitive assets are
-// reachable in <= 2 hops via OWNED_BY / SHARED_WITH / LAST_ACCESSED_BY edges,
-// and what is the worst-case classification along the path?
-//
-// Output: identity, blast_score (weighted by classification), reachable_asset_count,
-// worst_classification, sample_assets.
-//
-// Expected runtime on 500 demo rows: < 5s.
+// 01 — Sensitive Data Blast Radius
+// Question: For each identity (User or ExternalParty), how many sensitive
+// assets are reachable via OWNED_BY / SHARED_WITH / LAST_ACCESSED_BY edges?
+// Output: identity, blast_score, reachable assets, classifications, sources.
 
 let src = BigIDDSPMAssetStoreDemo_CL
-| project AssetId, AssetName, Sensitivity, Classification, DataSource,
-          Owner, LastAccessedBy, ExposedToUsers;
-//
-// Nodes: every asset + every distinct identity we can find on the row
-//
+| extend OwnerUpn = tostring(parse_json(AssetOwner).AccountUpn)
+| extend Perms = parse_json(AssetPermissions)
+| extend AllUsers = array_concat(
+    coalesce(Perms.Read, dynamic([])),
+    coalesce(Perms.Write, dynamic([])),
+    coalesce(Perms.FullControl, dynamic([])))
+| project AssetID, AssetName, AssetSource, Classification, OwnerUpn, UserName, AllUsers;
 let assetNodes = src
-| project nodeId = tostring(AssetId), nodeType = "Asset",
+| project nodeId = tostring(AssetID), nodeType = "Asset",
           label = AssetName, classification = tostring(Classification),
-          sensitivity = tostring(Sensitivity), dataSource = tostring(DataSource);
+          dataSource = tostring(AssetSource);
 let identityNodes = src
-| mv-expand exposed = ExposedToUsers to typeof(string)
-| extend identities = pack_array(tostring(Owner), tostring(LastAccessedBy), exposed)
-| mv-expand id = identities to typeof(string)
-| where isnotempty(id)
-| extend isExternal = id !contains "@contoso.com" and (id contains "@" or id contains "anonymous" or id contains "link" or id contains "ext-")
+| mv-expand u = AllUsers to typeof(string)
+| extend ids = pack_array(OwnerUpn, UserName, u)
+| mv-expand id = ids to typeof(string)
+| where isnotempty(id) and id contains "@" and id != "unknown"
+| extend isExternal = id !contains "@contoso.com"
 | project nodeId = id, nodeType = iff(isExternal, "ExternalParty", "User"),
-          label = id, classification = "", sensitivity = "", dataSource = ""
-| distinct nodeId, nodeType, label, classification, sensitivity, dataSource;
-let nodes = union assetNodes, identityNodes | distinct nodeId, nodeType, label, classification, sensitivity, dataSource;
-//
-// Edges: OWNED_BY / SHARED_WITH / LAST_ACCESSED_BY
-//
-let ownedBy = src | where isnotempty(Owner)
-| project source = tostring(AssetId), target = tostring(Owner), edge = "OWNED_BY";
-let sharedWith = src
-| mv-expand exposed = ExposedToUsers to typeof(string)
-| where isnotempty(exposed)
-| project source = tostring(AssetId), target = exposed, edge = "SHARED_WITH";
-let lastAccess = src | where isnotempty(LastAccessedBy)
-| project source = tostring(AssetId), target = tostring(LastAccessedBy), edge = "LAST_ACCESSED_BY";
-let edges = union ownedBy, sharedWith, lastAccess;
-//
-// Build the graph and walk 1-2 hops out from every identity
-//
+          label = id, classification = "", dataSource = ""
+| distinct nodeId, nodeType, label, classification, dataSource;
+let nodes = union assetNodes, identityNodes
+| distinct nodeId, nodeType, label, classification, dataSource;
+let edges = union
+    (src | where isnotempty(OwnerUpn) and OwnerUpn != "unknown"
+         | project source = tostring(AssetID), target = OwnerUpn, edge = "OWNED_BY"),
+    (src | mv-expand u = AllUsers to typeof(string)
+         | where isnotempty(u) and u contains "@"
+         | project source = tostring(AssetID), target = tostring(u), edge = "SHARED_WITH"),
+    (src | where isnotempty(UserName) and UserName contains "@"
+         | project source = tostring(AssetID), target = tostring(UserName), edge = "LAST_ACCESSED_BY");
 edges
 | make-graph source --> target with nodes on nodeId
-| graph-match (identity)-[e1]->(asset1)-[e2*0..1]->(asset2)
-    where (identity.nodeType == "User" or identity.nodeType == "ExternalParty")
-      and (asset1.nodeType == "Asset")
-      and (asset2.nodeType == "Asset")
-      and (asset2.classification in ("PII","PHI","PCI","Financial","Confidential"))
+| graph-match (asset)-[e]->(identity)
+    where asset.nodeType == "Asset"
+      and (identity.nodeType == "User" or identity.nodeType == "ExternalParty")
+      and asset.classification has_any ("PII","PHI","PCI","Financial","HIPAA","Trade Secret","Restricted","GDPR")
     project identity_id = identity.label,
             identity_type = identity.nodeType,
-            reachable_asset = asset2.label,
-            classification = asset2.classification,
-            sensitivity = asset2.sensitivity,
-            data_source = asset2.dataSource
+            reachable_asset = asset.label,
+            classification = asset.classification,
+            data_source = asset.dataSource
 | summarize reachable_asset_count = dcount(reachable_asset),
-            worst_classification = arg_max(iff(classification == "PCI", 4,
-                                          iff(classification == "PHI", 3,
-                                          iff(classification == "PII", 2,
-                                          iff(classification == "Financial", 1, 0)))), classification),
             sample_assets = make_set(reachable_asset, 5),
+            classifications = make_set(classification, 8),
             data_sources = make_set(data_source, 5)
         by identity_id, identity_type
-| extend blast_score = reachable_asset_count * case(worst_classification == "PCI", 4,
-                                                  worst_classification == "PHI", 3,
-                                                  worst_classification == "PII", 2,
-                                                  worst_classification == "Financial", 1,
-                                                  1)
+| extend cls_str = tostring(classifications)
+| extend blast_score = reachable_asset_count *
+    iff(cls_str has_any ("PCI","PHI","HIPAA"), 4,
+    iff(cls_str has "PII", 3,
+    iff(cls_str has_any ("Financial","Trade Secret"), 2, 1)))
 | project identity_id, identity_type, blast_score, reachable_asset_count,
-          worst_classification, data_sources, sample_assets
+          classifications, data_sources, sample_assets
 | order by blast_score desc
 | take 25

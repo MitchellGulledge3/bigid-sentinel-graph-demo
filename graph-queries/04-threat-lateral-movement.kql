@@ -1,53 +1,46 @@
-// Threat Lateral Movement on Regulated Data
+// 04 — Threat Lateral Movement on Regulated Data
 // Question: Trace every path from a malicious source IP, through a threat hit,
-// onto regulated assets, in <= 3 hops. Surfaces the assets currently at risk
-// because of an active threat signal.
-//
-// Output: source_ip, threat_category, regulated_asset, classification, path_length.
+// onto regulated assets, in <= 2 hops.
 
 let src = BigIDDSPMAssetStoreDemo_CL
-| project AssetId, AssetName, Classification, DataSource, Owner,
-          ThreatCategory, ThreatSourceIP, ExposedToUsers;
-let threatRows = src | where isnotempty(ThreatCategory) and isnotempty(ThreatSourceIP);
+| extend OwnerUpn = tostring(parse_json(AssetOwner).AccountUpn)
+| project AssetID, AssetName, AssetSource, Classification, OwnerUpn,
+          ThreatCategory, RequestSourceIP;
+let threatRows = src | where isnotempty(ThreatCategory) and isnotempty(RequestSourceIP);
 let assetNodes = src
-| project nodeId = tostring(AssetId), nodeType = "Asset",
+| project nodeId = tostring(AssetID), nodeType = "Asset",
           label = AssetName, classification = tostring(Classification),
-          dataSource = tostring(DataSource);
-let ipNodes = threatRows | distinct ThreatSourceIP
-| project nodeId = strcat("ip::", ThreatSourceIP), nodeType = "SourceIP",
-          label = tostring(ThreatSourceIP), classification = "", dataSource = "";
+          dataSource = tostring(AssetSource);
+let ipNodes = threatRows | distinct RequestSourceIP
+| project nodeId = strcat("ip::", RequestSourceIP), nodeType = "SourceIP",
+          label = tostring(RequestSourceIP), classification = "", dataSource = "";
 let threatNodes = threatRows
-| project nodeId = strcat("th::", AssetId, "::", ThreatCategory), nodeType = "Threat",
+| extend tnode = strcat("th::", AssetID, "::", ThreatCategory)
+| project nodeId = tnode, nodeType = "Threat",
           label = tostring(ThreatCategory), classification = "", dataSource = "";
-let userNodes = src | where isnotempty(Owner) | distinct Owner
-| project nodeId = tostring(Owner), nodeType = "User",
-          label = tostring(Owner), classification = "", dataSource = "";
-let nodes = union assetNodes, ipNodes, threatNodes, userNodes
+let nodes = union assetNodes, ipNodes, threatNodes
 | distinct nodeId, nodeType, label, classification, dataSource;
 let edges = union
-    (threatRows | project source = strcat("ip::", ThreatSourceIP),
-                          target = strcat("th::", AssetId, "::", ThreatCategory), edge = "ATTACKED"),
-    (threatRows | project source = strcat("th::", AssetId, "::", ThreatCategory),
-                          target = tostring(AssetId), edge = "TARGETED"),
-    (src | where isnotempty(Owner)
-         | project source = tostring(AssetId), target = tostring(Owner), edge = "OWNED_BY"),
-    (src | mv-expand exposed = ExposedToUsers to typeof(string)
-         | where isnotempty(exposed)
-         | project source = tostring(AssetId), target = exposed, edge = "SHARED_WITH");
+    (threatRows | extend tnode = strcat("th::", AssetID, "::", ThreatCategory)
+                | project source = strcat("ip::", RequestSourceIP), target = tnode, edge = "ATTACKED"),
+    (threatRows | extend tnode = strcat("th::", AssetID, "::", ThreatCategory)
+                | project source = tnode, target = tostring(AssetID), edge = "TARGETED");
 edges
 | make-graph source --> target with nodes on nodeId
-| graph-match (ip)-[e*1..3]->(asset)
+| graph-match (ip)-[e1]->(threat)-[e2]->(asset)
     where ip.nodeType == "SourceIP"
+      and threat.nodeType == "Threat"
       and asset.nodeType == "Asset"
-      and asset.classification in ("PII","PHI","PCI","Financial")
+      and asset.classification has_any ("PII","PHI","PCI","Financial","GDPR","HIPAA","Trade Secret","Restricted")
     project source_ip = ip.label,
+            threat_category = threat.label,
             regulated_asset = asset.label,
             classification = asset.classification,
-            data_source = asset.dataSource,
-            path_length = array_length(e),
-            edge_chain = e.edge
-| summarize arg_min(path_length, edge_chain),
-            asset_classifications = make_set(classification, 5)
-        by source_ip, regulated_asset, classification, data_source
-| order by path_length asc, classification asc
-| take 50
+            data_source = asset.dataSource
+| summarize hits = count(),
+            sample_assets = make_set(regulated_asset, 5),
+            classifications = make_set(classification, 5),
+            data_sources = make_set(data_source, 5)
+        by source_ip, threat_category
+| order by hits desc
+| take 25

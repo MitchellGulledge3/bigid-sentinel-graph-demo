@@ -22,6 +22,60 @@ Same BigID data. New shape. New questions. Same `BigIDDSPMAssetStoreDemo_CL` tab
 
 ---
 
+## Demo in VS Code (90 seconds)
+
+This is the fastest way to show it live in front of someone — pure VS Code, two panes, no browser flipping.
+
+### One-time setup
+
+```bash
+git clone https://github.com/MitchellGulledge3/bigid-sentinel-graph-demo.git
+cd bigid-sentinel-graph-demo
+code .
+az login   # use a user that has Log Analytics Reader on the workspace
+```
+
+### Demo layout in VS Code
+
+1. **Left pane:** Open `README.md` and press `⇧⌘V` (Mac) / `Ctrl+Shift+V` (Win/Linux) for the rendered Markdown preview. The Mermaid diagrams render natively.
+2. **Right pane:** Split editor → open the integrated terminal (`` ⌃` ``).
+3. Optional: open a `.kql` file from `graph-queries/` in a third tab so the audience can see the actual query.
+
+### Run the queries
+
+```bash
+# Interactive menu — pick 1-5 or "all"
+python3 demo.py
+
+# One-shot
+python3 demo.py 1        # Sensitive Data Blast Radius
+python3 demo.py 2        # External Exposure Paths
+python3 demo.py 3        # Orphan Cluster Detection
+python3 demo.py 4        # Threat Lateral Movement
+python3 demo.py 5        # Cross-Source Leakage
+python3 demo.py all      # Run them all in sequence
+```
+
+`demo.py` shells out to `az monitor log-analytics query` — zero Python deps, zero auth dance, just uses your `az login`.
+
+### Suggested 90-second talk track
+
+1. "Same BigID data the other repo used — but now we project it as a graph." → show `docs/graph-model.md`
+2. `python3 demo.py 1` — point at `blast_score` column, name top identity → "compromise this user, here's the exposure"
+3. `python3 demo.py 2` — point at `auditor@external-firm.com` row → "external party, one hop, PHI/HIPAA"
+4. `python3 demo.py 4` — point at `185.220.101.45` (Tor exit node) → "active threat already touching trade secrets"
+5. Pop the README preview pane → show the Mermaid result diagrams → "every result you just saw also renders as a graph picture"
+6. Close: "all 5 are also one `Save as tool` away from being agent-callable" → drop `bigid-sentinel-mcp-demo-ui` link
+
+### If you want a different workspace
+
+```bash
+export BIGID_GRAPH_WORKSPACE_ID=<your-workspace-guid>
+python3 demo.py 1
+```
+
+---
+
 ## Architecture at a glance
 
 ```mermaid
