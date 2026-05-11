@@ -58,7 +58,15 @@ pip install jupyter ipykernel matplotlib networkx pandas
 ```
 Then in VS Code, open a notebook → click **Run All**. Each notebook re-runs the live KQL against your workspace and re-renders the NetworkX graph.
 
-### Option B — Mermaid via `demo.py` ⚡
+### Option B — PySpark notebooks for the **Sentinel data lake VS Code extension** 🧪
+
+If you're using the new [Microsoft Sentinel VS Code extension](https://learn.microsoft.com/azure/sentinel/datalake/notebooks) (data lake preview) and want to run these as **PySpark** notebooks against the lake instead of locally, see **[`pyspark-notebooks/`](pyspark-notebooks/)**.
+
+These notebooks use `MicrosoftSentinelProvider` and the **Microsoft Sentinel** Spark kernel. Requires data-lake onboarding — see [`pyspark-notebooks/README.md`](pyspark-notebooks/README.md) for setup.
+
+> ⚠️ The Sentinel extension's sidebar shows **Lake tables** and **Jobs** — *not* notebook files. Open notebooks from VS Code's regular Explorer (`⇧⌘E`) and just select the **Microsoft Sentinel** kernel when you run them.
+
+### Option C — Mermaid via `demo.py` ⚡
 
 Faster cycle, no Jupyter needed:
 
